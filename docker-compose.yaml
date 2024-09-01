@@ -1,0 +1,78 @@
+version: '3'
+
+networks:
+    kurs_drf_network:
+        driver: bridge
+
+services:
+    redis:
+        image: redis:latest
+        restart: on-failure
+        networks:
+            - kurs_drf_network
+        expose:
+            - '6379'
+
+    db:
+        image: postgres:latest
+        restart: on-failure
+        networks:
+            - kurs_drf_network
+        env_file:
+            - .env
+        volumes:
+            - pg_data:/var/lib/postgres/data
+        healthcheck:
+            test: ['CMD-SHELL', '-c', 'pg_isready -U $POSTGRES_USER']
+            interval: 10s
+            timeout: 5s
+            retries: 5
+
+    app:
+        build: .
+        tty: true
+        networks:
+            - kurs_drf_network
+        ports:
+            - '80:8000'
+        env_file:
+            - .env
+        command: sh -c 'python manage.py migrate && python manage.py runserver 0.0.0.0:8000'
+        depends_on:
+            db:
+                condition: service_healthy
+        volumes:
+            - .:/app
+
+    celery:
+        build: .
+        tty: true
+        networks:
+            - kurs_drf_network
+        command: sh -c 'celery -A config worker -l info'
+        restart: on-failure
+        volumes:
+            - ./app
+        env_file:
+            - .env
+        depends_on:
+            - redis
+            - db
+            - app
+
+    celery_beat:
+        build: .
+        tty: true
+        networks:
+            - kurs_drf_network
+        command: celery -A config beat -l INFO
+        env_file:
+            - .env
+        depends_on:
+            - redis
+            - db
+            - app
+
+volumes:
+    pg_data:
+
